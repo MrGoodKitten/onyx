@@ -84,7 +84,6 @@ POSTGRES_CELERY_WORKER_LIGHT_APP_NAME = "celery_worker_light"
 POSTGRES_CELERY_WORKER_DOCPROCESSING_APP_NAME = "celery_worker_docprocessing"
 POSTGRES_CELERY_WORKER_DOCFETCHING_APP_NAME = "celery_worker_docfetching"
 POSTGRES_CELERY_WORKER_INDEXING_CHILD_APP_NAME = "celery_worker_indexing_child"
-POSTGRES_CELERY_WORKER_BACKGROUND_APP_NAME = "celery_worker_background"
 POSTGRES_CELERY_WORKER_HEAVY_APP_NAME = "celery_worker_heavy"
 POSTGRES_CELERY_WORKER_MONITORING_APP_NAME = "celery_worker_monitoring"
 POSTGRES_CELERY_WORKER_USER_FILE_PROCESSING_APP_NAME = (
@@ -102,7 +101,6 @@ DISCORD_SERVICE_API_KEY_NAME = "discord-bot-service"
 
 # Key-Value store keys
 KV_REINDEX_KEY = "needs_reindexing"
-KV_SEARCH_SETTINGS = "search_settings"
 KV_UNSTRUCTURED_API_KEY = "unstructured_api_key"
 KV_USER_STORE_KEY = "INVITED_USERS"
 KV_PENDING_USERS_KEY = "PENDING_USERS"
@@ -158,7 +156,28 @@ CELERY_EXTERNAL_GROUP_SYNC_LOCK_TIMEOUT = 300  # 5 min
 
 CELERY_USER_FILE_PROCESSING_LOCK_TIMEOUT = 30 * 60  # 30 minutes (in seconds)
 
+# How long a queued user-file task is valid before workers discard it.
+# Should be longer than the beat interval (20 s) but short enough to prevent
+# indefinite queue growth.  Workers drop tasks older than this without touching
+# the DB, so a shorter value = faster drain of stale duplicates.
+CELERY_USER_FILE_PROCESSING_TASK_EXPIRES = 60  # 1 minute (in seconds)
+
+# Maximum number of tasks allowed in the user-file-processing queue before the
+# beat generator stops adding more.  Prevents unbounded queue growth when workers
+# fall behind.
+USER_FILE_PROCESSING_MAX_QUEUE_DEPTH = 500
+# How long a queued user-file-project-sync task remains valid.
+# Should be short enough to discard stale queue entries under load while still
+# allowing workers enough time to pick up new tasks.
+CELERY_USER_FILE_PROJECT_SYNC_TASK_EXPIRES = 60  # 1 minute (in seconds)
+
+# Max queue depth before user-file-project-sync producers stop enqueuing.
+# This applies backpressure when workers are falling behind.
+USER_FILE_PROJECT_SYNC_MAX_QUEUE_DEPTH = 500
+
 CELERY_USER_FILE_PROJECT_SYNC_LOCK_TIMEOUT = 5 * 60  # 5 minutes (in seconds)
+
+CELERY_SANDBOX_FILE_SYNC_LOCK_TIMEOUT = 5 * 60  # 5 minutes (in seconds)
 
 DANSWER_REDIS_FUNCTION_LOCK_PREFIX = "da_function_lock:"
 
@@ -226,6 +245,9 @@ class DocumentSource(str, Enum):
     MOCK_CONNECTOR = "mock_connector"
     # Special case for user files
     USER_FILE = "user_file"
+    # Raw files for Craft sandbox access (xlsx, pptx, docx, etc.)
+    # Uses RAW_BINARY processing mode - no text extraction
+    CRAFT_FILE = "craft_file"
 
 
 class FederatedConnectorSource(str, Enum):
@@ -305,9 +327,9 @@ class MessageType(str, Enum):
     # System message is always constructed on the fly, not saved
     SYSTEM = "system"  # SystemMessage
     USER = "user"  # HumanMessage
-    ASSISTANT = "assistant"  # AIMessage
-    TOOL_CALL = "tool_call"
+    ASSISTANT = "assistant"  # AIMessage - Can include tool_calls field for parallel tool calling
     TOOL_CALL_RESPONSE = "tool_call_response"
+    USER_REMINDER = "user_reminder"  # Custom Onyx message type which is translated into a USER message when passed to the LLM
 
 
 class ChatMessageSimpleType(str, Enum):
@@ -323,10 +345,16 @@ class TokenRateLimitScope(str, Enum):
     GLOBAL = "global"
 
 
+class FileStoreType(str, Enum):
+    S3 = "s3"
+    POSTGRES = "postgres"
+
+
 class FileOrigin(str, Enum):
     CHAT_UPLOAD = "chat_upload"
     CHAT_IMAGE_GEN = "chat_image_gen"
     CONNECTOR = "connector"
+    CONNECTOR_METADATA = "connector_metadata"
     GENERATED_REPORT = "generated_report"
     INDEXING_CHECKPOINT = "indexing_checkpoint"
     PLAINTEXT_CACHE = "plaintext_cache"
@@ -347,6 +375,7 @@ class MilestoneRecordType(str, Enum):
     CREATED_CONNECTOR = "created_connector"
     CONNECTOR_SUCCEEDED = "connector_succeeded"
     RAN_QUERY = "ran_query"
+    USER_MESSAGE_SENT = "user_message_sent"
     MULTIPLE_ASSISTANTS = "multiple_assistants"
     CREATED_ASSISTANT = "created_assistant"
     CREATED_ONYX_BOT = "created_onyx_bot"
@@ -391,6 +420,8 @@ class OnyxCeleryQueues:
     # Sandbox processing queue
     SANDBOX = "sandbox"
 
+    OPENSEARCH_MIGRATION = "opensearch_migration"
+
 
 class OnyxRedisLocks:
     PRIMARY_WORKER = "da_lock:primary_worker"
@@ -430,8 +461,12 @@ class OnyxRedisLocks:
     # User file processing
     USER_FILE_PROCESSING_BEAT_LOCK = "da_lock:check_user_file_processing_beat"
     USER_FILE_PROCESSING_LOCK_PREFIX = "da_lock:user_file_processing"
+    # Short-lived key set when a task is enqueued; cleared when the worker picks it up.
+    # Prevents the beat from re-enqueuing the same file while a task is already queued.
+    USER_FILE_QUEUED_PREFIX = "da_lock:user_file_queued"
     USER_FILE_PROJECT_SYNC_BEAT_LOCK = "da_lock:check_user_file_project_sync_beat"
     USER_FILE_PROJECT_SYNC_LOCK_PREFIX = "da_lock:user_file_project_sync"
+    USER_FILE_PROJECT_SYNC_QUEUED_PREFIX = "da_lock:user_file_project_sync_queued"
     USER_FILE_DELETE_BEAT_LOCK = "da_lock:check_user_file_delete_beat"
     USER_FILE_DELETE_LOCK_PREFIX = "da_lock:user_file_delete"
 
@@ -441,6 +476,9 @@ class OnyxRedisLocks:
     # Sandbox cleanup
     CLEANUP_IDLE_SANDBOXES_BEAT_LOCK = "da_lock:cleanup_idle_sandboxes_beat"
     CLEANUP_OLD_SNAPSHOTS_BEAT_LOCK = "da_lock:cleanup_old_snapshots_beat"
+
+    # Sandbox file sync
+    SANDBOX_FILE_SYNC_LOCK_PREFIX = "da_lock:sandbox_file_sync"
 
 
 class OnyxRedisSignals:
@@ -569,8 +607,11 @@ class OnyxCeleryTask:
     CHECK_FOR_DOCUMENTS_FOR_OPENSEARCH_MIGRATION_TASK = (
         "check_for_documents_for_opensearch_migration_task"
     )
-    MIGRATE_DOCUMENT_FROM_VESPA_TO_OPENSEARCH_TASK = (
-        "migrate_document_from_vespa_to_opensearch_task"
+    MIGRATE_DOCUMENTS_FROM_VESPA_TO_OPENSEARCH_TASK = (
+        "migrate_documents_from_vespa_to_opensearch_task"
+    )
+    MIGRATE_CHUNKS_FROM_VESPA_TO_OPENSEARCH_TASK = (
+        "migrate_chunks_from_vespa_to_opensearch_task"
     )
 
 

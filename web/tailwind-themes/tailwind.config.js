@@ -12,6 +12,12 @@ module.exports = {
     transparent: "transparent",
     current: "currentColor",
     extend: {
+      lineClamp: {
+        7: "7",
+        8: "8",
+        9: "9",
+        10: "10",
+      },
       transitionProperty: {
         spacing: "margin, padding",
       },
@@ -254,6 +260,7 @@ module.exports = {
         "code-string": "var(--code-string)",
         "code-number": "var(--code-number)",
         "code-definition": "var(--code-definition)",
+        "background-code-01": "var(--background-code-01)",
 
         // Shimmer colors for loading animations
         "shimmer-base": "var(--shimmer-base)",
@@ -363,6 +370,13 @@ module.exports = {
     require("@tailwindcss/container-queries"),
     plugin(({ addVariant }) => {
       addVariant("focus-within-nonactive", "&:focus-within:not(:active)");
+    }),
+    plugin(({ addUtilities }) => {
+      addUtilities({
+        ".break-anywhere": {
+          "overflow-wrap": "anywhere",
+        },
+      });
     }),
   ],
 };

@@ -3,7 +3,6 @@ import time
 from collections.abc import Callable
 from collections.abc import Generator
 from queue import Empty
-from typing import Any
 
 from onyx.chat.citation_processor import CitationMapping
 from onyx.chat.emitter import Emitter
@@ -45,6 +44,8 @@ class ChatStateContainer:
         self.citation_to_doc: CitationMapping = {}
         # True if this turn is a clarification question (deep research flow)
         self.is_clarification: bool = False
+        # Pre-answer processing time (time before answer starts) in seconds
+        self.pre_answer_processing_time: float | None = None
         # Note: LLM cost tracking is now handled in multi_llm.py
         # Search doc collection - maps dedup key to SearchDoc for all docs from tool calls
         self._all_search_docs: dict[SearchDocKey, SearchDoc] = {}
@@ -101,6 +102,16 @@ class ChatStateContainer:
         with self._lock:
             return self.is_clarification
 
+    def set_pre_answer_processing_time(self, duration: float | None) -> None:
+        """Set the pre-answer processing time (time before answer starts)."""
+        with self._lock:
+            self.pre_answer_processing_time = duration
+
+    def get_pre_answer_processing_time(self) -> float | None:
+        """Thread-safe getter for pre_answer_processing_time."""
+        with self._lock:
+            return self.pre_answer_processing_time
+
     @staticmethod
     def create_search_doc_key(
         search_doc: SearchDoc, use_simple_key: bool = True
@@ -151,13 +162,11 @@ class ChatStateContainer:
 
 
 def run_chat_loop_with_state_containers(
-    func: Callable[..., None],
+    chat_loop_func: Callable[[Emitter, ChatStateContainer], None],
     completion_callback: Callable[[ChatStateContainer], None],
     is_connected: Callable[[], bool],
     emitter: Emitter,
     state_container: ChatStateContainer,
-    *args: Any,
-    **kwargs: Any,
 ) -> Generator[Packet, None]:
     """
     Explicit wrapper function that runs a function in a background thread
@@ -168,19 +177,18 @@ def run_chat_loop_with_state_containers(
 
     Args:
         func: The function to wrap (should accept emitter and state_container as first and second args)
+        completion_callback: Callback function to call when the function completes
         emitter: Emitter instance for sending packets
         state_container: ChatStateContainer instance for accumulating state
         is_connected: Callable that returns False when stop signal is set
-        *args: Additional positional arguments for func
-        **kwargs: Additional keyword arguments for func
 
     Usage:
         packets = run_chat_loop_with_state_containers(
             my_func,
+            completion_callback=completion_callback,
             emitter=emitter,
             state_container=state_container,
             is_connected=check_func,
-            arg1, arg2, kwarg1=value1
         )
         for packet in packets:
             # Process packets
@@ -189,9 +197,7 @@ def run_chat_loop_with_state_containers(
 
     def run_with_exception_capture() -> None:
         try:
-            # Ensure state_container is passed explicitly, removing it from kwargs if present
-            kwargs_with_state = {**kwargs, "state_container": state_container}
-            func(emitter, *args, **kwargs_with_state)
+            chat_loop_func(emitter, state_container)
         except Exception as e:
             # If execution fails, emit an exception packet
             emitter.emit(

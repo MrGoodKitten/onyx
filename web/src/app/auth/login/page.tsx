@@ -1,4 +1,3 @@
-import { HealthCheckBanner } from "@/components/health/healthcheck";
 import { User } from "@/lib/types";
 import {
   getCurrentUserSS,
@@ -24,6 +23,8 @@ export default async function Page(props: PageProps) {
   const nextUrl: string | null = Array.isArray(searchParams?.next)
     ? searchParams?.next[0] ?? null
     : searchParams?.next ?? null;
+  const verified = searchParams?.verified === "true";
+  const isFirstUser = searchParams?.first_user === "true";
 
   // catch cases where the backend is completely unreachable here
   // without try / catch, will just raise an exception and the page
@@ -71,15 +72,7 @@ export default async function Page(props: PageProps) {
   let authUrl: string | null = null;
   if (authTypeMetadata) {
     try {
-      // For BASIC auth with OAuth enabled, fetch the OAuth URL
-      if (
-        authTypeMetadata.authType === AuthType.BASIC &&
-        authTypeMetadata.oauthEnabled
-      ) {
-        authUrl = await getAuthUrlSS(AuthType.GOOGLE_OAUTH, nextUrl);
-      } else {
-        authUrl = await getAuthUrlSS(authTypeMetadata.authType, nextUrl);
-      }
+      authUrl = await getAuthUrlSS(authTypeMetadata.authType, nextUrl);
     } catch (e) {
       console.log(`Some fetch failed for the login page - ${e}`);
     }
@@ -103,15 +96,13 @@ export default async function Page(props: PageProps) {
         authState="login"
         footerContent={ssoLoginFooterContent}
       >
-        <div className="absolute top-10x w-full">
-          <HealthCheckBanner />
-        </div>
-
         <LoginPage
           authUrl={authUrl}
           authTypeMetadata={authTypeMetadata}
           nextUrl={nextUrl}
           hidePageRedirect={true}
+          verified={verified}
+          isFirstUser={isFirstUser}
         />
       </AuthFlowContainer>
     </div>

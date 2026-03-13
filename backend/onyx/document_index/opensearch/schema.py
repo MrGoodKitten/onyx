@@ -11,11 +11,17 @@ from pydantic import model_serializer
 from pydantic import model_validator
 from pydantic import SerializerFunctionWrapHandler
 
+from onyx.configs.app_configs import OPENSEARCH_TEXT_ANALYZER
+from onyx.configs.app_configs import USING_AWS_MANAGED_OPENSEARCH
 from onyx.document_index.interfaces_new import TenantState
 from onyx.document_index.opensearch.constants import DEFAULT_MAX_CHUNK_SIZE
 from onyx.document_index.opensearch.constants import EF_CONSTRUCTION
 from onyx.document_index.opensearch.constants import EF_SEARCH
 from onyx.document_index.opensearch.constants import M
+from onyx.document_index.opensearch.string_filtering import (
+    filter_and_validate_document_id,
+)
+from onyx.utils.tenant import get_tenant_id_short_string
 from shared_configs.configs import MULTI_TENANT
 from shared_configs.contextvars import get_current_tenant_id
 
@@ -36,6 +42,7 @@ IMAGE_FILE_ID_FIELD_NAME = "image_file_id"
 SOURCE_LINKS_FIELD_NAME = "source_links"
 DOCUMENT_SETS_FIELD_NAME = "document_sets"
 USER_PROJECTS_FIELD_NAME = "user_projects"
+PERSONAS_FIELD_NAME = "personas"
 DOCUMENT_ID_FIELD_NAME = "document_id"
 CHUNK_INDEX_FIELD_NAME = "chunk_index"
 MAX_CHUNK_SIZE_FIELD_NAME = "max_chunk_size"
@@ -50,18 +57,36 @@ SECONDARY_OWNERS_FIELD_NAME = "secondary_owners"
 ANCESTOR_HIERARCHY_NODE_IDS_FIELD_NAME = "ancestor_hierarchy_node_ids"
 
 
+# Faiss was also tried but it didn't have any benefits
+# NMSLIB is deprecated, not recommended
+OPENSEARCH_KNN_ENGINE = "lucene"
+
+
 def get_opensearch_doc_chunk_id(
-    document_id: str, chunk_index: int, max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE
+    tenant_state: TenantState,
+    document_id: str,
+    chunk_index: int,
+    max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
 ) -> str:
     """
     Returns a unique identifier for the chunk.
 
-    TODO(andrei): Add source type to this.
-    TODO(andrei): Add tenant ID to this.
-    TODO(andrei): Sanitize document_id in the event it contains characters that
-    are not allowed in OpenSearch IDs.
+    This will be the string used to identify the chunk in OpenSearch. Any direct
+    chunk queries should use this function.
     """
-    return f"{document_id}__{max_chunk_size}__{chunk_index}"
+    sanitized_document_id = filter_and_validate_document_id(document_id)
+    opensearch_doc_chunk_id = (
+        f"{sanitized_document_id}__{max_chunk_size}__{chunk_index}"
+    )
+    if tenant_state.multitenant:
+        # Use tenant ID because in multitenant mode each tenant has its own
+        # Documents table, so there is a very small chance that doc IDs are not
+        # actually unique across all tenants.
+        short_tenant_id = get_tenant_id_short_string(tenant_state.tenant_id)
+        opensearch_doc_chunk_id = f"{short_tenant_id}__{opensearch_doc_chunk_id}"
+    # Do one more validation to ensure we haven't exceeded the max length.
+    opensearch_doc_chunk_id = filter_and_validate_document_id(opensearch_doc_chunk_id)
+    return opensearch_doc_chunk_id
 
 
 def set_or_convert_timezone_to_utc(value: datetime) -> datetime:
@@ -133,6 +158,7 @@ class DocumentChunk(BaseModel):
 
     document_sets: list[str] | None = None
     user_projects: list[int] | None = None
+    personas: list[int] | None = None
     primary_owners: list[str] | None = None
     secondary_owners: list[str] | None = None
 
@@ -146,6 +172,13 @@ class DocumentChunk(BaseModel):
             tenant_id=get_current_tenant_id(), multitenant=MULTI_TENANT
         )
     )
+
+    def __str__(self) -> str:
+        return (
+            f"DocumentChunk(document_id={self.document_id}, chunk_index={self.chunk_index}, "
+            f"content length={len(self.content)}, content vector length={len(self.content_vector)}, "
+            f"tenant_id={self.tenant_id.tenant_id})"
+        )
 
     @model_validator(mode="after")
     def check_title_and_title_vector_are_consistent(self) -> Self:
@@ -180,7 +213,9 @@ class DocumentChunk(BaseModel):
 
     @field_serializer("last_updated", mode="wrap")
     def serialize_datetime_fields_to_epoch_seconds(
-        self, value: datetime | None, handler: SerializerFunctionWrapHandler
+        self,
+        value: datetime | None,
+        handler: SerializerFunctionWrapHandler,  # noqa: ARG002
     ) -> int | None:
         """
         Serializes datetime fields to seconds since the Unix epoch.
@@ -208,13 +243,14 @@ class DocumentChunk(BaseModel):
             return value
         if not isinstance(value, int):
             raise ValueError(
-                f"Bug: Expected an int for the last_updated property from OpenSearch, got {type(value)} instead."
+                f"Bug: Expected an int for the last_updated property from OpenSearch, got "
+                f"{type(value)} instead."
             )
         return datetime.fromtimestamp(value, tz=timezone.utc)
 
     @field_serializer("tenant_id", mode="wrap")
     def serialize_tenant_state(
-        self, value: TenantState, handler: SerializerFunctionWrapHandler
+        self, value: TenantState, handler: SerializerFunctionWrapHandler  # noqa: ARG002
     ) -> str | None:
         """
         Serializes tenant_state to the tenant str if multitenant, or None if
@@ -249,19 +285,22 @@ class DocumentChunk(BaseModel):
         elif isinstance(value, TenantState):
             if MULTI_TENANT != value.multitenant:
                 raise ValueError(
-                    f"Bug: An existing TenantState object was supplied to the DocumentChunk model but its multi-tenant mode "
-                    f"({value.multitenant}) does not match the program's current global tenancy state."
+                    f"Bug: An existing TenantState object was supplied to the DocumentChunk model "
+                    f"but its multi-tenant mode ({value.multitenant}) does not match the program's "
+                    "current global tenancy state."
                 )
             return value
         elif not isinstance(value, str):
             raise ValueError(
-                f"Bug: Expected a str for the tenant_id property from OpenSearch, got {type(value)} instead."
+                f"Bug: Expected a str for the tenant_id property from OpenSearch, got "
+                f"{type(value)} instead."
             )
         else:
             if not MULTI_TENANT:
                 raise ValueError(
-                    "Bug: Got a non-null str for the tenant_id property from OpenSearch but multi-tenant mode is not enabled. "
-                    "This is unexpected because in single-tenant mode we don't expect to see a tenant_id."
+                    "Bug: Got a non-null str for the tenant_id property from OpenSearch but "
+                    "multi-tenant mode is not enabled. This is unexpected because in single-tenant "
+                    "mode we don't expect to see a tenant_id."
                 )
             return TenantState(tenant_id=value, multitenant=MULTI_TENANT)
 
@@ -317,6 +356,11 @@ class DocumentSchema:
             "properties": {
                 TITLE_FIELD_NAME: {
                     "type": "text",
+                    # Language analyzer (e.g. english) stems at index and search
+                    # time for variant matching. Configure via
+                    # OPENSEARCH_TEXT_ANALYZER. Existing indices need reindexing
+                    # after a change.
+                    "analyzer": OPENSEARCH_TEXT_ANALYZER,
                     "fields": {
                         # Subfield accessed as title.keyword. Not indexed for
                         # values longer than 256 chars.
@@ -331,9 +375,7 @@ class DocumentSchema:
                 CONTENT_FIELD_NAME: {
                     "type": "text",
                     "store": True,
-                    # This makes highlighting text during queries more efficient
-                    # at the cost of disk space. See
-                    # https://docs.opensearch.org/latest/search-plugins/searching-data/highlight/#methods-of-obtaining-offsets
+                    "analyzer": OPENSEARCH_TEXT_ANALYZER,
                     "index_options": "offsets",
                 },
                 TITLE_VECTOR_FIELD_NAME: {
@@ -342,7 +384,7 @@ class DocumentSchema:
                     "method": {
                         "name": "hnsw",
                         "space_type": "cosinesimil",
-                        "engine": "lucene",
+                        "engine": OPENSEARCH_KNN_ENGINE,
                         "parameters": {"ef_construction": EF_CONSTRUCTION, "m": M},
                     },
                 },
@@ -354,7 +396,7 @@ class DocumentSchema:
                     "method": {
                         "name": "hnsw",
                         "space_type": "cosinesimil",
-                        "engine": "lucene",
+                        "engine": OPENSEARCH_KNN_ENGINE,
                         "parameters": {"ef_construction": EF_CONSTRUCTION, "m": M},
                     },
                 },
@@ -452,6 +494,7 @@ class DocumentSchema:
                 # Product-specific fields.
                 DOCUMENT_SETS_FIELD_NAME: {"type": "keyword"},
                 USER_PROJECTS_FIELD_NAME: {"type": "integer"},
+                PERSONAS_FIELD_NAME: {"type": "integer"},
                 PRIMARY_OWNERS_FIELD_NAME: {"type": "keyword"},
                 SECONDARY_OWNERS_FIELD_NAME: {"type": "keyword"},
                 # OpenSearch metadata fields.
@@ -489,7 +532,7 @@ class DocumentSchema:
         }
 
     @staticmethod
-    def get_index_settings_for_aws_managed_opensearch() -> dict[str, Any]:
+    def get_index_settings_for_aws_managed_opensearch_st_dev() -> dict[str, Any]:
         """
         Settings for AWS-managed OpenSearch.
 
@@ -510,3 +553,41 @@ class DocumentSchema:
                 "knn.algo_param.ef_search": EF_SEARCH,
             }
         }
+
+    @staticmethod
+    def get_index_settings_for_aws_managed_opensearch_mt_cloud() -> dict[str, Any]:
+        """
+        Settings for AWS-managed OpenSearch in multi-tenant cloud.
+
+        324 shards very roughly targets a storage load of ~30Gb per shard, which
+        according to AWS OpenSearch documentation is within a good target range.
+
+        As documented above we need 2 replicas for a total of 3 copies of the
+        data because the cluster is configured with 3-AZ awareness.
+        """
+        return {
+            "index": {
+                "number_of_shards": 324,
+                "number_of_replicas": 2,
+                # Required for vector search.
+                "knn": True,
+                "knn.algo_param.ef_search": EF_SEARCH,
+            }
+        }
+
+    @staticmethod
+    def get_index_settings_based_on_environment() -> dict[str, Any]:
+        """
+        Returns the index settings based on the environment.
+        """
+        if USING_AWS_MANAGED_OPENSEARCH:
+            if MULTI_TENANT:
+                return (
+                    DocumentSchema.get_index_settings_for_aws_managed_opensearch_mt_cloud()
+                )
+            else:
+                return (
+                    DocumentSchema.get_index_settings_for_aws_managed_opensearch_st_dev()
+                )
+        else:
+            return DocumentSchema.get_index_settings()

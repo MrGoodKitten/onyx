@@ -6,7 +6,7 @@ import { UserFileStatus } from "@/app/app/projects/projectsService";
 import { cn, isImageFile } from "@/lib/utils";
 import SimpleLoader from "@/refresh-components/loaders/SimpleLoader";
 import { SvgFileText, SvgX } from "@opal/icons";
-import { Hoverable, HoverableContainer } from "@/refresh-components/Hoverable";
+import { Interactive } from "@opal/core";
 import { AttachmentItemLayout } from "@/layouts/general-layouts";
 import Spacer from "@/refresh-components/Spacer";
 
@@ -173,9 +173,9 @@ export function FileCard({
         removeFile && doneUploading ? () => removeFile(file.id) : undefined
       }
     >
-      <div className="max-w-[12rem]">
-        <Hoverable asChild nonInteractive>
-          <HoverableContainer noPadding border heightVariant="full">
+      <div className="min-w-0 max-w-[12rem]">
+        <Interactive.Container border heightVariant="fit">
+          <div className="[&_.opal-content-md-body]:min-w-0 [&_.opal-content-md-title]:break-all">
             <AttachmentItemLayout
               icon={isProcessing ? SimpleLoader : SvgFileText}
               title={file.name}
@@ -187,9 +187,9 @@ export function FileCard({
                   : typeLabel
               }
             />
-            <Spacer horizontal rem={0.5} />
-          </HoverableContainer>
-        </Hoverable>
+          </div>
+          <Spacer horizontal rem={0.5} />
+        </Interactive.Container>
       </div>
     </Removable>
   );

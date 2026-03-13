@@ -6,7 +6,6 @@ from uuid import UUID
 
 from pydantic import BaseModel
 from pydantic import Field
-from pydantic import field_validator
 
 from onyx.configs.constants import DocumentSource
 from onyx.db.models import SearchSettings
@@ -73,6 +72,7 @@ class BaseFilters(BaseModel):
 class UserFileFilters(BaseModel):
     user_file_ids: list[UUID] | None = None
     project_id: int | None = None
+    persona_id: int | None = None
 
 
 class AssistantKnowledgeFilters(BaseModel):
@@ -97,21 +97,6 @@ class IndexFilters(BaseFilters, UserFileFilters, AssistantKnowledgeFilters):
     tenant_id: str | None = None
 
 
-class ChunkContext(BaseModel):
-    # If not specified (None), picked up from Persona settings if there is space
-    # if specified (even if 0), it always uses the specified number of chunks above and below
-    chunks_above: int | None = None
-    chunks_below: int | None = None
-    full_doc: bool = False
-
-    @field_validator("chunks_above", "chunks_below")
-    @classmethod
-    def check_non_negative(cls, value: int, field: Any) -> int:
-        if value is not None and value < 0:
-            raise ValueError(f"{field.name} must be non-negative")
-        return value
-
-
 class BasicChunkRequest(BaseModel):
     query: str
 
@@ -122,7 +107,6 @@ class BasicChunkRequest(BaseModel):
     recency_bias_multiplier: float = 1.0
 
     limit: int | None = None
-    offset: int | None = None  # This one is not set currently
 
 
 class ChunkSearchRequest(BasicChunkRequest):

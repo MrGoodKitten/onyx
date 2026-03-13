@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Generate AGENTS.md by scanning the files directory and populating the template.
 
-This script runs at container startup, AFTER the init container has synced files
-from S3. It scans the /workspace/files directory to discover what knowledge sources
-are available and generates appropriate documentation.
+This script runs during session setup, AFTER files have been synced from S3
+and the files symlink has been created. It reads an existing AGENTS.md (which
+contains the {{KNOWLEDGE_SOURCES_SECTION}} placeholder), replaces the
+placeholder by scanning the knowledge source directory, and writes it back.
 
-Environment variables:
-- AGENT_INSTRUCTIONS: The template content with placeholders to replace
+Usage:
+    python3 generate_agents_md.py <agents_md_path> <files_path>
+
+Arguments:
+    agents_md_path: Path to the AGENTS.md file to update in place
+    files_path: Path to the files directory to scan for knowledge sources
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -61,63 +65,18 @@ CONNECTOR_INFO: dict[str, ConnectorInfoEntry] = {
         "file_pattern": "`PAGE_TITLE.json`",
         "scan_depth": 1,
     },
-    "org_info": {
-        "summary": "Organizational structure and user identity",
-        "file_pattern": "Various JSON files",
-        "scan_depth": 0,
+    "user_library": {
+        "summary": "User-uploaded files (spreadsheets, documents, presentations, etc.)",
+        "file_pattern": "Any file format",
+        "scan_depth": 1,
     },
 }
 DEFAULT_SCAN_DEPTH = 1
-
-# Content for the attachments section when user has uploaded files
-# NOTE: This is duplicated from agent_instructions.py to avoid circular imports
-ATTACHMENTS_SECTION_CONTENT = """## Attachments (PRIORITY)
-
-The `attachments/` directory contains files that the user has explicitly
-uploaded during this session. **These files are critically important** and
-should be treated as high-priority context.
-
-### Why Attachments Matter
-
-- The user deliberately chose to upload these files, signaling they are directly relevant to the task
-- These files often contain the specific data, requirements, or examples the user wants you to work with
-- They may include spreadsheets, documents, images, or code that should inform your work
-
-### Required Actions
-
-**At the start of every task, you MUST:**
-
-1. **Check for attachments**: List the contents of `attachments/` to see what the user has provided
-2. **Read and analyze each file**: Thoroughly examine every attachment to understand its contents and relevance
-3. **Reference attachment content**: Use the information from attachments to inform your responses and outputs
-
-### File Handling
-
-- Uploaded files may be in various formats: CSV, JSON, PDF, images, text files, etc.
-- For spreadsheets and data files, examine the structure, columns, and sample data
-- For documents, extract key information and requirements
-- For images, analyze and describe their content
-- For code files, understand the logic and patterns
-
-**Do NOT ignore user uploaded files.** They are there for a reason and likely
-contain exactly what you need to complete the task successfully."""
 
 
 def _normalize_connector_name(name: str) -> str:
     """Normalize a connector directory name for lookup."""
     return name.lower().replace(" ", "_").replace("-", "_")
-
-
-def build_attachments_section(attachments_path: Path) -> str:
-    """Return attachments section if files exist, empty string otherwise."""
-    if not attachments_path.exists():
-        return ""
-    try:
-        if any(attachments_path.iterdir()):
-            return ATTACHMENTS_SECTION_CONTENT
-    except Exception:
-        pass
-    return ""
 
 
 def _scan_directory_to_depth(
@@ -232,43 +191,41 @@ def build_knowledge_sources_section(files_path: Path) -> str:
 
 
 def main() -> None:
-    """Main entry point for container startup script."""
-    # Read template from environment variable
-    template = os.environ.get("AGENT_INSTRUCTIONS", "")
-    if not template:
-        print("Warning: No AGENT_INSTRUCTIONS template provided", file=sys.stderr)
-        template = "# Agent Instructions\n\nNo instructions provided."
+    """Main entry point for container startup script.
 
-    # Scan files directory
-    files_path = Path("/workspace/files")
-    knowledge_sources_section = build_knowledge_sources_section(files_path)
+    Reads an existing AGENTS.md, replaces the {{KNOWLEDGE_SOURCES_SECTION}}
+    placeholder by scanning the files directory, and writes it back.
 
-    # Check attachments directory
-    attachments_path = Path("/workspace/attachments")
-    attachments_section = build_attachments_section(attachments_path)
+    Usage:
+        python3 generate_agents_md.py <agents_md_path> <files_path>
+    """
+    if len(sys.argv) != 3:
+        print(
+            f"Usage: {sys.argv[0]} <agents_md_path> <files_path>",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-    # Replace placeholders
-    content = template
-    content = content.replace(
+    agents_md_path = Path(sys.argv[1])
+    files_path = Path(sys.argv[2])
+
+    if not agents_md_path.exists():
+        print(f"Error: {agents_md_path} not found", file=sys.stderr)
+        sys.exit(1)
+
+    template = agents_md_path.read_text()
+
+    # Resolve symlinks (handles both direct symlinks and dirs containing symlinks)
+    resolved_files_path = files_path.resolve()
+
+    knowledge_sources_section = build_knowledge_sources_section(resolved_files_path)
+
+    # Replace placeholder and write back
+    content = template.replace(
         "{{KNOWLEDGE_SOURCES_SECTION}}", knowledge_sources_section
     )
-    content = content.replace("{{ATTACHMENTS_SECTION}}", attachments_section)
-
-    # Write AGENTS.md
-    output_path = Path("/workspace/AGENTS.md")
-    output_path.write_text(content)
-
-    # Log result
-    source_count = 0
-    if files_path.exists():
-        source_count = len(
-            [
-                d
-                for d in files_path.iterdir()
-                if d.is_dir() and not d.name.startswith(".")
-            ]
-        )
-    print(f"Generated AGENTS.md with {source_count} knowledge sources")
+    agents_md_path.write_text(content)
+    print(f"Populated knowledge sources in {agents_md_path}")
 
 
 if __name__ == "__main__":
