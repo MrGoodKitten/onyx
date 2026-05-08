@@ -1061,3 +1061,68 @@ def get_recent_files(
     )
 
     return [UserFileSnapshot.from_model(user_file) for user_file in user_files]
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from onyx.db.models import User
+
+
+def set_stripe_customer_id(
+    db_session: Session,
+    user_id,
+    stripe_customer_id: str,
+) -> None:
+    if not stripe_customer_id:
+        raise HTTPException(status_code=400, detail="Missing stripe customer id")
+
+    if not stripe_customer_id.startswith("cus_"):
+        raise HTTPException(status_code=400, detail="Invalid Stripe customer id")
+
+    user = db_session.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.stripe_customer_id = stripe_customer_id
+    db_session.commit()
+
+
+def get_stripe_customer_id(
+    db_session: Session,
+    user_id,
+) -> str | None:
+    user = db_session.query(User).filter(User.id == user_id).first()
+    if not user:
+        return None
+
+    return getattr(user, "stripe_customer_id", None)
+
+
+def set_stripe_payment_details(
+    db_session: Session,
+    user_id,
+    *,
+    default_payment_method_brand: str | None = None,
+    default_payment_method_last4: str | None = None,
+    default_bank_name: str | None = None,
+    default_bank_last4: str | None = None,
+    payments_enabled: bool | None = None,
+    payouts_enabled: bool | None = None,
+) -> None:
+    user = db_session.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if default_payment_method_brand is not None:
+        user.default_payment_method_brand = default_payment_method_brand
+    if default_payment_method_last4 is not None:
+        user.default_payment_method_last4 = default_payment_method_last4
+    if default_bank_name is not None:
+        user.default_bank_name = default_bank_name
+    if default_bank_last4 is not None:
+        user.default_bank_last4 = default_bank_last4
+    if payments_enabled is not None:
+        user.payments_enabled = payments_enabled
+    if payouts_enabled is not None:
+        user.payouts_enabled = payouts_enabled
+
+    db_session.commit()
