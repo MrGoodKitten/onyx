@@ -35,15 +35,7 @@ import { humanReadableFormatShort } from "@/lib/time";
 import { NEXT_PUBLIC_CLOUD_ENABLED } from "@/lib/constants";
 import useUsers from "@/hooks/useUsers";
 
-// ----------------------------------------------------------------------------
-// Constants
-// ----------------------------------------------------------------------------
-
 const GRACE_PERIOD_DAYS = 30;
-
-// ----------------------------------------------------------------------------
-// Helpers
-// ----------------------------------------------------------------------------
 
 function getExpirationState(
   billing: BillingInformation,
@@ -51,7 +43,6 @@ function getExpirationState(
 ) {
   const isAnnualBilling = billing.billing_period === "annual";
 
-  // Check license expiration for self-hosted
   if (license?.expires_at) {
     const expiresAt = new Date(license.expires_at);
     const now = new Date();
@@ -79,7 +70,6 @@ function getExpirationState(
       };
     }
 
-    // Only show warning for annual subscriptions (30 days before expiration)
     if (isAnnualBilling && daysRemaining <= 30) {
       return {
         variant: "warning" as const,
@@ -89,7 +79,6 @@ function getExpirationState(
     }
   }
 
-  // Check billing expiration for cloud (only show warnings for canceled subscriptions)
   if (billing.cancel_at_period_end && billing.current_period_end) {
     const expiresAt = new Date(billing.current_period_end);
     const now = new Date();
@@ -115,8 +104,6 @@ function getExpirationState(
       };
     }
 
-    // Only show warning for annual subscriptions (30 days before expiration)
-    // Monthly subscriptions auto-renew, so no warning needed
     if (isAnnualBilling && daysRemaining <= 30) {
       return {
         variant: "warning" as const,
@@ -137,10 +124,6 @@ function getExpirationState(
 
   return null;
 }
-
-// ----------------------------------------------------------------------------
-// SubscriptionCard
-// ----------------------------------------------------------------------------
 
 function SubscriptionCard({
   billing,
@@ -174,15 +157,10 @@ function SubscriptionCard({
   const isCanceling = billing?.cancel_at_period_end;
 
   let subtitle: string;
-  if (isExpired) {
-    subtitle = `Expired on ${formattedDate}`;
-  } else if (isCanceling) {
-    subtitle = `Valid until ${formattedDate}`;
-  } else if (billing) {
-    subtitle = `Next payment on ${formattedDate}`;
-  } else {
-    subtitle = `Valid until ${formattedDate}`;
-  }
+  if (isExpired) subtitle = `Expired on ${formattedDate}`;
+  else if (isCanceling) subtitle = `Valid until ${formattedDate}`;
+  else if (billing) subtitle = `Next payment on ${formattedDate}`;
+  else subtitle = `Valid until ${formattedDate}`;
 
   const handleManagePlan = async () => {
     try {
@@ -222,10 +200,9 @@ function SubscriptionCard({
           <Text headingH3Muted text04>
             {planName}
           </Text>
-          <Text secondaryBody text03>
-            {subtitle}
-          </Text>
+          <Text secondaryBody text03>{subtitle}</Text>
         </Section>
+
         <Section
           flexDirection="column"
           gap={0.25}
@@ -260,7 +237,7 @@ function SubscriptionCard({
               Manage Plan
             </OpalButton>
           )}
-          {/* TODO(@raunakab): migrate to opal Button once className/iconClassName is resolved */}
+
           <Button tertiary onClick={onViewPlans} className="billing-text-link">
             <Text secondaryBody text03>
               View Plan Details
@@ -271,10 +248,6 @@ function SubscriptionCard({
     </Card>
   );
 }
-
-// ----------------------------------------------------------------------------
-// SeatsCard
-// ----------------------------------------------------------------------------
 
 function SeatsCard({
   billing,
@@ -293,7 +266,7 @@ function SeatsCard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: usersData, isLoading: isLoadingUsers } = useUsers({
+  const {  usersData, isLoading: isLoadingUsers } = useUsers({
     includeApiKeys: false,
   });
 
@@ -334,10 +307,8 @@ function SeatsCard({
     try {
       await updateSeatCount({ new_seat_count: newSeatCount });
       if (!NEXT_PUBLIC_CLOUD_ENABLED) {
-        // Wait for control plane to process the subscription update before claiming
         await new Promise((resolve) => setTimeout(resolve, 1500));
         await claimLicense();
-        // Force refresh the Redis cache from the database
         await refreshLicenseCache();
       }
       await onRefresh?.();
@@ -408,10 +379,7 @@ function SeatsCard({
                 You cannot set seats below current{" "}
                 <span className="font-semibold">{minRequiredSeats}</span> seats
                 in use/pending.{" "}
-                <Link
-                  href="/admin/users"
-                  className="underline hover:no-underline"
-                >
+                <Link href="/admin/users" className="underline hover:no-underline">
                   Remove users
                 </Link>{" "}
                 first before adjusting seats.
@@ -424,11 +392,7 @@ function SeatsCard({
               </Text>
             ) : null}
 
-            {error && (
-              <Text secondaryBody className="billing-error-text">
-                {error}
-              </Text>
-            )}
+            {error && <Text secondaryBody className="billing-error-text">{error}</Text>}
           </Section>
         </div>
 
@@ -442,32 +406,18 @@ function SeatsCard({
           {isAdding ? (
             <Text secondaryBody text03>
               You will be billed for the{" "}
-              <Text secondaryBody text04>
-                {seatCount}
-              </Text>{" "}
-              additional {seatWord} at a pro-rated amount.
+              <Text secondaryBody text04>{seatCount}</Text> additional {seatWord} at a pro-rated amount.
             </Text>
           ) : isRemoving ? (
             <Text secondaryBody text03>
-              <Text secondaryBody text04>
-                {seatCount}
-              </Text>{" "}
-              {seatWord} will be removed on{" "}
-              <Text secondaryBody text04>
-                {nextBillingDate}
-              </Text>{" "}
-              (after current billing cycle).
+              <Text secondaryBody text04>{seatCount}</Text> {seatWord} will be removed on{" "}
+              <Text secondaryBody text04>{nextBillingDate}</Text> (after current billing cycle).
             </Text>
           ) : (
-            <Text secondaryBody text03>
-              No changes to your billing.
-            </Text>
+            <Text secondaryBody text03>No changes to your billing.</Text>
           )}
-          <Disabled
-            disabled={
-              isSubmitting || newSeatCount === totalSeats || isBelowMinimum
-            }
-          >
+
+          <Disabled disabled={isSubmitting || newSeatCount === totalSeats || isBelowMinimum}>
             <OpalButton onClick={handleConfirm}>
               {isSubmitting ? "Saving..." : "Confirm Change"}
             </OpalButton>
@@ -490,10 +440,10 @@ function SeatsCard({
             {totalSeats} Seats
           </Text>
           <Text secondaryBody text03>
-            {usedSeats} in use • {pendingSeats} pending • {remainingSeats}{" "}
-            remaining
+            {usedSeats} in use • {pendingSeats} pending • {remainingSeats} remaining
           </Text>
         </Section>
+
         <Section
           flexDirection="row"
           gap={0.5}
@@ -508,6 +458,7 @@ function SeatsCard({
           >
             View Users
           </OpalButton>
+
           {!hideUpdateSeats && (
             <Disabled disabled={isLoadingUsers || disabled || !billing}>
               <OpalButton
@@ -524,10 +475,6 @@ function SeatsCard({
     </Card>
   );
 }
-
-// ----------------------------------------------------------------------------
-// PaymentSection
-// ----------------------------------------------------------------------------
 
 function PaymentSection({ billing }: { billing: BillingInformation }) {
   const handleOpenPortal = async () => {
@@ -547,16 +494,18 @@ function PaymentSection({ billing }: { billing: BillingInformation }) {
 
   const lastPaymentDate = formatDateShort(billing.current_period_start);
 
+  const paymentTitle =
+    billing.default_bank_name && billing.default_bank_last4
+      ? `${billing.default_bank_name} ending in ${billing.default_bank_last4}`
+      : billing.default_payment_method_brand && billing.default_payment_method_last4
+        ? `${billing.default_payment_method_brand} ending in ${billing.default_payment_method_last4}`
+        : "No payment method on file";
+
   return (
     <div className="billing-payment-section">
       <Section alignItems="start" height="auto" width="full">
         <Text mainContentEmphasis>Payment</Text>
-        <Section
-          flexDirection="row"
-          gap={0.5}
-          alignItems="stretch"
-          height="auto"
-        >
+        <Section flexDirection="row" gap={0.5} alignItems="stretch" height="auto">
           <Card className="billing-payment-card">
             <Section
               flexDirection="row"
@@ -566,7 +515,7 @@ function PaymentSection({ billing }: { billing: BillingInformation }) {
             >
               <InfoBlock
                 icon={SvgWallet}
-                title="Visa ending in 1234"
+                title={paymentTitle}
                 description="Payment method"
               />
               <OpalButton
@@ -578,6 +527,7 @@ function PaymentSection({ billing }: { billing: BillingInformation }) {
               </OpalButton>
             </Section>
           </Card>
+
           {lastPaymentDate && (
             <Card className="billing-payment-card">
               <Section
@@ -607,10 +557,6 @@ function PaymentSection({ billing }: { billing: BillingInformation }) {
   );
 }
 
-// ----------------------------------------------------------------------------
-// BillingDetailsView
-// ----------------------------------------------------------------------------
-
 interface BillingDetailsViewProps {
   billing?: BillingInformation;
   license?: LicenseStatus;
@@ -638,7 +584,6 @@ export default function BillingDetailsView({
 
   return (
     <Section gap={1} height="auto" width="full">
-      {/* Stripe connection error banner */}
       {hasStripeError && (
         <Message
           static
@@ -650,7 +595,6 @@ export default function BillingDetailsView({
         />
       )}
 
-      {/* Air-gapped mode info banner */}
       {isAirGapped && !hasStripeError && !isManualLicenseOnly && (
         <Message
           static
@@ -662,7 +606,6 @@ export default function BillingDetailsView({
         />
       )}
 
-      {/* Expiration banner */}
       {expirationState && (
         <Message
           static
@@ -687,7 +630,6 @@ export default function BillingDetailsView({
         />
       )}
 
-      {/* Subscription card */}
       {(billing || license?.has_license) && (
         <SubscriptionCard
           billing={billing}
@@ -699,10 +641,8 @@ export default function BillingDetailsView({
         />
       )}
 
-      {/* License card (inline for manual license users) */}
       {licenseCard}
 
-      {/* Seats card */}
       <SeatsCard
         billing={billing}
         license={license}
@@ -711,9 +651,9 @@ export default function BillingDetailsView({
         hideUpdateSeats={isManualLicenseOnly}
       />
 
-      {/* Payment section */}
-      {/* TODO: Re-enable payment section when APIs for fetching payment details are implemented */}
-      {/* {billing?.payment_method_enabled && !isAirGapped && <PaymentSection billing={billing} />} */}
+      {billing?.payment_method_enabled && !isAirGapped && (
+        <PaymentSection billing={billing} />
+      )}
     </Section>
   );
 }
