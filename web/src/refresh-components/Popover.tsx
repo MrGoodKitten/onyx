@@ -8,106 +8,13 @@ import ShadowDiv from "@/refresh-components/ShadowDiv";
 import { WithoutStyles } from "@/types";
 import { Section } from "@/layouts/general-layouts";
 
-/**
- * Popover Root Component
- *
- * Wrapper around Radix Popover.Root for managing popover state.
- *
- * @example
- * ```tsx
- * <Popover open={isOpen} onOpenChange={setIsOpen}>
- *   <Popover.Trigger>
- *     <button>Open</button>
- *   </Popover.Trigger>
- *   <Popover.Content>
- *     {/* Popover content *\/}
- *   </Popover.Content>
- * </Popover>
- * ```
- */
 const PopoverRoot = PopoverPrimitive.Root;
-
-/**
- * Popover Trigger Component
- *
- * Button or element that triggers the popover to open.
- *
- * @example
- * ```tsx
- * <Popover.Trigger asChild>
- *   <button>Click me</button>
- * </Popover.Trigger>
- * ```
- */
 const PopoverTrigger = PopoverPrimitive.Trigger;
-
-/**
- * Popover Anchor Component
- *
- * An optional element to position the popover relative to.
- *
- * @example
- * ```tsx
- * <Popover>
- *   <Popover.Anchor asChild>
- *     <div>Anchor element</div>
- *   </Popover.Anchor>
- *   <Popover.Trigger>
- *     <button>Click me</button>
- *   </Popover.Trigger>
- *   <Popover.Content>
- *     {/* This will be positioned relative to the anchor *\/}
- *   </Popover.Content>
- * </Popover>
- * ```
- */
 const PopoverAnchor = PopoverPrimitive.Anchor;
-
-/**
- * Popover Close Component
- *
- * Element that closes the popover when clicked.
- *
- * @example
- * ```tsx
- * <Popover.Close asChild>
- *   <button>Close</button>
- * </Popover.Close>
- * ```
- */
 const PopoverClose = PopoverPrimitive.Close;
 
-/**
- * Popover Content Component
- *
- * The main popover container with default styling.
- *
- * Widths:
- * - `fit`: Fits content width (default)
- * - `md`: Medium width (12rem)
- * - `lg`: Large width (15rem)
- * - `xl`: Extra large width (18rem)
- *
- * @param width - Width of the popover. Default: "fit"
- *
- * @example
- * ```tsx
- * <Popover.Content align="start" sideOffset={8}>
- *   <div>Popover content here</div>
- * </Popover.Content>
- *
- * // Medium width
- * <Popover.Content width="md">
- *   <div>Medium width content</div>
- * </Popover.Content>
- *
- * // Extra large width
- * <Popover.Content width="xl">
- *   <div>Extra large width content</div>
- * </Popover.Content>
- * ```
- */
 type PopoverWidths = "fit" | "md" | "lg" | "xl" | "trigger";
+
 const widthClasses: Record<PopoverWidths, string> = {
   fit: "w-fit",
   md: "w-[12rem]",
@@ -115,20 +22,17 @@ const widthClasses: Record<PopoverWidths, string> = {
   xl: "w-[18rem]",
   trigger: "w-[var(--radix-popover-trigger-width)]",
 };
-interface PopoverContentProps
-  extends WithoutStyles<
-    React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
-  > {
+
+type PopoverContentProps = WithoutStyles<
+  React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
+> & {
   width?: PopoverWidths;
-  ref?: React.Ref<React.ComponentRef<typeof PopoverPrimitive.Content>>;
-}
-function PopoverContent({
-  width = "fit",
-  align = "center",
-  sideOffset = 4,
-  ref,
-  ...props
-}: PopoverContentProps) {
+};
+
+const PopoverContent = React.forwardRef<
+  React.ElementRef<typeof PopoverPrimitive.Content>,
+  PopoverContentProps
+>(({ width = "fit", align = "center", sideOffset = 4, ...props }, ref) => {
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
@@ -145,66 +49,19 @@ function PopoverContent({
       />
     </PopoverPrimitive.Portal>
   );
-}
-
-export default Object.assign(PopoverRoot, {
-  Trigger: PopoverTrigger,
-  Anchor: PopoverAnchor,
-  Content: PopoverContent,
-  Close: PopoverClose,
-  Menu: PopoverMenu,
 });
-
-// ============================================================================
-// Common Layouts
-// ============================================================================
+PopoverContent.displayName = "PopoverContent";
 
 function SeparatorHelper() {
   return <Separator className="py-0 px-2" />;
 }
 
-/**
- * Popover Menu Component
- *
- * Converts a list of React nodes into a vertical menu with automatic separator handling.
- *
- * @remarks
- * - Treats `null` values as separator lines
- * - Filters out `undefined` and `false` values
- * - Removes separators at the beginning and end of the list
- *
- * @example
- * ```tsx
- * <Popover>
- *   <Popover.Trigger asChild>
- *     <button>Options</button>
- *   </Popover.Trigger>
- *   <Popover.Content>
- *     <Popover.Menu>
- *       <MenuItem>Option 1</MenuItem>
- *       <MenuItem>Option 2</MenuItem>
- *       {null}  {/* Separator line *\/}
- *       <MenuItem>Option 3</MenuItem>
- *     </Popover.Menu>
- *   </Popover.Content>
- * </Popover>
- *
- * // With footer
- * <Popover.Menu
- *   footer={<Button>Apply</Button>}
- * >
- *   <MenuItem>Item 1</MenuItem>
- *   <MenuItem>Item 2</MenuItem>
- * </Popover.Menu>
- * ```
- */
 export interface PopoverMenuProps {
-  children?: React.ReactNode[];
+  children?: React.ReactNode;
   footer?: React.ReactNode;
-
-  // Ref for the scrollable container (useful for programmatic scrolling)
   scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
+
 export function PopoverMenu({
   children,
   footer,
@@ -212,12 +69,13 @@ export function PopoverMenu({
 }: PopoverMenuProps) {
   if (!children) return null;
 
-  const definedChildren = children.filter(
+  const childArray = React.Children.toArray(children).filter(
     (child) => child !== undefined && child !== false
   );
-  const filteredChildren = definedChildren.filter((child, index) => {
+
+  const filteredChildren = childArray.filter((child, index) => {
     if (child !== null) return true;
-    return index !== 0 && index !== definedChildren.length - 1;
+    return index !== 0 && index !== childArray.length - 1;
   });
 
   return (
@@ -228,14 +86,7 @@ export function PopoverMenu({
       >
         {filteredChildren.map((child, index) => (
           <div key={index}>
-            {child === undefined ? (
-              <></>
-            ) : child === null ? (
-              // Render `null`s as separator lines
-              <SeparatorHelper />
-            ) : (
-              child
-            )}
+            {child === null ? <SeparatorHelper /> : child}
           </div>
         ))}
       </ShadowDiv>
@@ -248,3 +99,13 @@ export function PopoverMenu({
     </Section>
   );
 }
+
+const Popover = Object.assign(PopoverRoot, {
+  Trigger: PopoverTrigger,
+  Anchor: PopoverAnchor,
+  Content: PopoverContent,
+  Close: PopoverClose,
+  Menu: PopoverMenu,
+});
+
+export default Popover;
