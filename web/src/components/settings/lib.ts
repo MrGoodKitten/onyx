@@ -65,9 +65,7 @@ export async function fetchSettingsSS(): Promise<CombinedSettings | null> {
         };
       } else {
         throw new Error(
-          `fetchStandardSettingsSS failed: status=${
-            result_0.status
-          } body=${await result_0.text()}`
+          `fetchStandardSettingsSS failed: status=${result_0.status} body=${await result_0.text()}`
         );
       }
     } else {
@@ -84,9 +82,7 @@ export async function fetchSettingsSS(): Promise<CombinedSettings | null> {
       if (!result_1.ok) {
         if (result_1.status !== 403 && result_1.status !== 401) {
           throw new Error(
-            `fetchEnterpriseSettingsSS failed: status=${
-              result_1.status
-            } body=${await result_1.text()}`
+            `fetchEnterpriseSettingsSS failed: status=${result_1.status} body=${await result_1.text()}`
           );
         }
       } else {
@@ -104,9 +100,7 @@ export async function fetchSettingsSS(): Promise<CombinedSettings | null> {
       if (!result_2.ok) {
         if (result_2.status !== 403) {
           throw new Error(
-            `fetchCustomAnalyticsScriptSS failed: status=${
-              result_2.status
-            } body=${await result_2.text()}`
+            `fetchCustomAnalyticsScriptSS failed: status=${result_2.status} body=${await result_2.text()}`
           );
         }
       } else {
@@ -126,8 +120,6 @@ export async function fetchSettingsSS(): Promise<CombinedSettings | null> {
       customAnalyticsScript,
       webVersion,
       webDomain: HOST_URL,
-      // Server-side default; the real value is computed client-side in
-      // SettingsProvider where connector data is available via useCCPairs.
       isSearchModeAvailable: settings.search_ui_enabled !== false,
     };
 
