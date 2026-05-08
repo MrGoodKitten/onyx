@@ -21,3 +21,4 @@ export interface BillingInformation {
   payouts_enabled?: boolean;
   payments_enabled?: boolean;
 }
+
