@@ -1,0 +1,36 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Billing {
+  id                       String   @id @default(uuid())
+  tenantId                 String   @unique
+  status                   String?
+  planType                 String?
+  seats                    Int?
+  billingPeriod            String?
+  currentPeriodStart       DateTime?
+  currentPeriodEnd         DateTime?
+  cancelAtPeriodEnd        Boolean  @default(false)
+  canceledAt               DateTime?
+  trialStart               DateTime?
+  trialEnd                 DateTime?
+  paymentMethodEnabled     Boolean  @default(false)
+
+  stripeCustomerId         String?  @unique
+  stripeConnectAccountId   String?  @unique
+  defaultPaymentMethodBrand String?
+  defaultPaymentMethodLast4 String?
+  defaultBankName          String?
+  defaultBankLast4         String?
+  payoutsEnabled           Boolean  @default(false)
+  paymentsEnabled          Boolean  @default(false)
+
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
